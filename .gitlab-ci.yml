@@ -1,0 +1,96 @@
+image: docker:stable
+
+stages:
+  - build
+  - deploy
+  - permission
+
+.x-before-deploy: &x-before-deploy
+  before_script:
+    - 'command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$GITLAB_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+
+docker-build:
+  stage: build
+  tags:
+    - build
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - |
+      if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
+        tag=":latest"
+        echo "Running on default branch '$CI_DEFAULT_BRANCH': tag = $tag"
+      else
+        tag=":$CI_COMMIT_BRANCH"
+        echo "Running on branch '$CI_COMMIT_BRANCH': tag = $tag"
+      fi
+    - docker build --pull -t "$CI_REGISTRY_IMAGE${tag}" .
+    - docker push "$CI_REGISTRY_IMAGE${tag}"
+  # Run this job in a branch where a Dockerfile exists
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "stage" 
+      exists:
+        - Dockerfile
+  after_script:
+    - docker logout ${CI_REGISTRY}
+
+deploy-dev:
+  stage: deploy
+  only:
+    - dev
+  tags:
+    - deploy  
+  <<: *x-before-deploy
+  script:
+    - ssh $SSH_DEV "cd $PROJECT_DIR_DEV && docker-compose stop $DOCKER_SERVICE_NAME && docker-compose pull $DOCKER_SERVICE_NAME && docker-compose up -d $DOCKER_SERVICE_NAME"
+  
+deploy-stage:
+  stage: deploy
+  only:
+    - stage
+  <<: *x-before-deploy
+  script:
+    - ssh $SSH_STAGE "cd $PROJECT_DIR_STAGE && docker-compose stop $DOCKER_SERVICE_NAME && docker-compose pull $DOCKER_SERVICE_NAME && docker-compose up -d $DOCKER_SERVICE_NAME"
+  
+deploy-prod:
+  stage: deploy
+  only:
+    - master
+  <<: *x-before-deploy
+  script:
+    - ssh $SSH_PROD "cd $PROJECT_DIR_PROD && docker-compose stop $DOCKER_SERVICE_NAME && docker-compose pull $DOCKER_SERVICE_NAME && docker-compose up -d $DOCKER_SERVICE_NAME"
+
+permission-dev:
+  stage: permission
+  only:
+    - dev
+  tags:
+    - permission
+  <<: *x-before-deploy  
+  script:
+    - ssh $SSH_DEV "mkdir -p ~/script && chmod 700 ~/script && echo \"$PORTAINER_PERMISSION_SCRIPT\" > ~/script/portainer.py && python3 ~/script/portainer.py -e \"$PORTAINER_ENDPOINT_DEV\" -l \"$GITLAB_PORTAINER_USER\" -p \"$GITLAB_PORTAINER_PASSWORD\" -c \"$PORTAINER_CONTAINER\" -g \"$PORTAINER_GROUP\" && rm ~/script -fr"
+
+permission-stage:
+  stage: permission
+  only:
+    - stage
+  tags:
+    - permission
+  <<: *x-before-deploy    
+  script:
+    - ssh $SSH_STAGE "mkdir -p ~/script && chmod 700 ~/script && echo \"$PORTAINER_PERMISSION_SCRIPT\" > ~/script/portainer.py && python3 ~/script/portainer.py -e \"$PORTAINER_ENDPOINT_STAGE\" -l \"$GITLAB_PORTAINER_USER\" -p \"$GITLAB_PORTAINER_PASSWORD\" -c \"$PORTAINER_CONTAINER\" -g \"$PORTAINER_GROUP\" && rm ~/script -fr"            
+
+permission-prod:
+  stage: permission
+  only:
+    - master
+  tags:
+    - permission
+  <<: *x-before-deploy    
+  script:
+    - ssh $SSH_PROD "mkdir -p ~/script && chmod 700 ~/script && echo \"$PORTAINER_PERMISSION_SCRIPT\" > ~/script/portainer.py && python3 ~/script/portainer.py -e \"$PORTAINER_ENDPOINT_PROD\" -l \"$GITLAB_PORTAINER_USER\" -p \"$GITLAB_PORTAINER_PASSWORD\" -c \"$PORTAINER_CONTAINER\" -g \"$PORTAINER_GROUP\" && rm ~/script -fr"            
