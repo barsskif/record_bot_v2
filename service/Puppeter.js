@@ -26,6 +26,7 @@ export const openBrowser = async (req, res, server_url) => {
         const data = {
             status: 200,
             is_open_browser: true
+
         };
 
         return res.status(200).send({ data: data });
@@ -111,7 +112,61 @@ export const openBrowser = async (req, res, server_url) => {
     if (recordButton) {
         console.log('Кнопка найдена');
         // Вы можете взаимодействовать с кнопкой, используя переменную recordButton, например:
-        await recordButton.click();
+        // await recordButton.click();
+
+        const recordBot = async () => {
+            const joinRoomCallback = async () => {
+                // Устройство — это конечная точка, подключающаяся к маршрутизатору на
+                // серверная часть для отправки/получения мультимедиа
+                await createDevice(device, rtpCapabilities);
+
+                socket.current.emit(
+                    'createWebRtcTransport',
+                    { consumer: true },
+                    async ({ params }) => {
+                        // Сервер отправляет обратно необходимые параметры
+                        // создать Send Transport на стороне клиента
+                        if (params.error) {
+                            console.log(params.error);
+                            return;
+                        }
+
+                        console.log(params);
+
+                        // создает новый транспорт WebRTC для отправки мультимедиа
+                        // на основе параметров транспорта производителя сервера
+                        // https://mediasoup.org/documentation/v3/mediasoup-client/api/#TransportOptions
+                        producerTransport.current =
+                            device.current.createSendTransport(params);
+
+                        // https://mediasoup.org/documentation/v3/communication-between-client-and-server/#producing-media
+                        // это событие возникает при первом вызове Transport.produce()
+                        producerTransport.current.on(
+                            'connect',
+                            async ({ dtlsParameters }, callback, errback) => {
+                                try {
+                                    // Передавать локальные параметры DTLS на транспорт на стороне сервера.
+                                    socket.current.emit('transport-connect', {
+                                        dtlsParameters,
+                                    });
+
+                                    // Сообщение транспорту, что параметры были переданы
+                                    callback();
+                                } catch (error) {
+                                    errback(error);
+                                }
+                            }
+                        );
+                    }
+                );
+
+                getProducers();
+            };
+            await joinRoom(socket, rtpCapabilities, roomName, joinRoomCallback);
+        };
+
+        recordBot()
+
         console.log(recordButton)
     } else {
         console.log('Кнопка не найдена');

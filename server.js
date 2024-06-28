@@ -10,7 +10,7 @@ import { closeBrowser, openBrowser, startRecordEndStopRecord } from './service/P
 dotenv.config();
 
 const app = express();
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT) || 3555;
 const serverUrlDefaul = process.env.SERVER_URL;
 const xvfb = new Xvfb({
   xvfb_args: ["-screen", "0", '1280x1080x24', "-ac"],
